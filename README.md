@@ -6,6 +6,9 @@ Self-Driving Car Engineer Nanodegree Program
 [image2]: ./images/lane_changes_2.png "Lane classification 2"
 [image3]: ./images/yt.png "Youtube video"
 
+[![Youtube Link][image3]](https://youtu.be/o5z_dCy6NX4 "Youtube video")
+(click on this image to watch the video on YouTube)
+
 ### Simulator.
 You can download the Term3 Simulator which contains the Path Planning Project from the [releases tab (https://github.com/udacity/self-driving-car-sim/releases/tag/T3_v1.2).
 
@@ -17,9 +20,9 @@ Each waypoint in the list contains  [x,y,s,dx,dy] values. x and y are the waypoi
 
 The highway's waypoints loop around so the frenet s value, distance along the road, goes from 0 to 6945.554.
 
-## Reflection
+## Code model documentation
 
-In the reflection section I am going to explain how the final submission code is working. The code is based on the original repository and additional elements from the course walkthrough video material. The main points to achieve are 
+In the code model documentation section I am going to explain how the final submission code is working. The code is based on the original repository and additional elements from the course walkthrough video material. The main points to achieve are 
 
 * Drive around the track without incident
 * Keep speed but do not exceed speed limit
@@ -175,14 +178,14 @@ And in safe or unsafe lanes because of other cars with high velocity:
   }
 ```
 
-### Pros and cons
+### Reflection
 
 There might be a lot more points to think of. What if some other car suddenly changes its lane, and our trajectory falls into its way (collision!). Additionally, there could be a module that checks if a lane change makes sense - because if there is a much slower car in front of us after the lange change, this maneuver was senseless. 
 
 ### Video
 
 Please click on the following image to open the Youtube-video:
-![Youtube video][image3]
+[![Youtube Link][image3]](https://youtu.be/o5z_dCy6NX4 "Youtube video")
 
 
 
