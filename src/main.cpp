@@ -168,6 +168,41 @@ float getGlobalLane(const float local_lane) {
   return 2.0 + 4.0 * local_lane;
 }
 
+bool isOnLocalLane(const float d, const int local_lane, const float eps = 0.25) {
+  if(d < getGlobalLane((float)local_lane + eps) && d > getGlobalLane((float)local_lane - eps))
+    return true;
+  return false;
+}
+
+bool isInCorridor(const float s, const float s_ref, const float gap_forward, const float gap_backwards) {
+  return ((s < (s_ref + gap_forward)) && (s > (s_ref - gap_backwards)));
+}
+
+int switchLane(const int current_lane, const vector<bool>& safe_lanes) {
+  if(safe_lanes.size() != 3)
+    return current_lane;
+
+  bool all_blocked = true;
+  for(const auto & c_safe : safe_lanes)
+    all_blocked &= !c_safe;
+
+  if(all_blocked)
+    return current_lane;
+
+  vector<int> possible_lane_switches;
+  if(current_lane - 1 >= 0)
+    possible_lane_switches.push_back(current_lane - 1);
+
+  if(current_lane + 1 <= 2)
+    possible_lane_switches.push_back(current_lane + 1);
+
+  for(const auto & lane_switch : possible_lane_switches) {
+    if(safe_lanes[lane_switch] == true)
+      return lane_switch;
+  }
+
+  return current_lane;
+}
 
 int main() {
   uWS::Hub h;
@@ -176,8 +211,8 @@ int main() {
   int local_lane = 1;
 
   // Target velocity
-  double v_ref = 49.5;
-  double v_ref_cruise = v_ref;
+  double v_ref = 0.0;
+  double v_ref_cruise = 49.5;
 
   // Rough horizon waypoints
   int waypoints_count = 3;
@@ -187,8 +222,17 @@ int main() {
   int path_points_count = 50;
 
   // Minimum Distance in meters to car in front
-  double min_distance_front = 15.0;
+  double min_distance_front = 20.0;
 
+  // Gap length in front of us in meters for safe lane switch
+  double gap_length_front = 15.0;
+  // Gap length behind us in meters for safe lane switch
+  double gap_length_back = 15.0;
+
+  // Gap length behind us in meters were we look for other vehicles traveling with high speed
+  double gap_speed_sensoring_length = 30.0;
+  // Maximum speed gap of a car that drives behind us on a lane where we want to switch to.
+  double gap_max_speed_diff = 20.0;
 
   // Load up map values for waypoint's x,y,s and d normalized normal vectors
   vector<double> map_waypoints_x;
@@ -198,11 +242,13 @@ int main() {
   vector<double> map_waypoints_dy;
 
   // Waypoint map to read from
-  string map_file_ = "../data/highway_map.csv";
+  string map_file_ = "data/highway_map.csv";
   // The max s value before wrapping around the track back to 0
   double max_s = 6945.554;
 
   ifstream in_map_(map_file_.c_str(), ifstream::in);
+
+  std::cout << in_map_.is_open() << std::endl;
 
   string line;
   while (getline(in_map_, line)) {
@@ -229,6 +275,10 @@ int main() {
                &waypoints_count, &waypoints_dists,
                &local_lane, &v_ref, &v_ref_cruise,
                &path_points_count,
+               &gap_length_front,
+               &gap_length_back,
+               &gap_speed_sensoring_length,
+               &gap_max_speed_diff,
                &min_distance_front](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
@@ -277,32 +327,80 @@ int main() {
           	// Check sensor fusion for collision avoidance
           	bool too_close = false;
 
-          	if(prev_points_size > 0){
-          	  car_s = end_path_s;
-          	}
+          	// For all lanes, define a boolean for 'this is safe to switch onto'
+          	vector<bool> lane_safe_switch(3, true);
 
           	// Iterate sensor fusion data
+          	float lane_offset = 0.25;
           	for(int i = 0; i < sensor_fusion.size(); i++) {
+
           	  // Check if there is a car directly in front of us in our lane
           	  float d = sensor_fusion[i][6];
-          	  if(d < getGlobalLane((float)local_lane + 0.5) && d > getGlobalLane((float)local_lane - 0.5)){
-          	    // There is a car in our Lane!
-          	    double vx = sensor_fusion[i][3];
-          	    double vy = sensor_fusion[i][4];
-          	    double check_speed = sqrt(vx*vx + vy*vy);
-          	    double check_car_s = sensor_fusion[i][5];
 
+          	  double vx = sensor_fusion[i][3];
+              double vy = sensor_fusion[i][4];
+
+              double check_speed = sqrt(vx*vx + vy*vy);
+              double check_car_s = sensor_fusion[i][5];
+
+              bool on_lane = isOnLocalLane(d, local_lane, lane_offset);
+          	  if(on_lane){
+          	    // There is a car in our Lane!
           	    check_car_s += ((double)prev_points_size * 0.02 * check_speed);
-          	    if((check_car_s > car_s) && ((check_car_s - car_s) < min_distance_front)) {
-          	      v_ref = check_speed * 0.8;
+          	    if((check_car_s > end_path_s) && ((check_car_s - end_path_s) < min_distance_front)) {
           	      too_close = true;
+
+          	    }
+          	  }
+
+          	  // Check if this car blocks the switch to a lane
+          	  for(int lane_id = 0; lane_id <=2; lane_id++) {
+
+          	    // Check if this car is on the current lane to be checked
+          	    bool on_curr_lane = isOnLocalLane(d, lane_id, lane_offset);
+          	    if(on_curr_lane) {
+
+                  // If yes, check if this car is in the zone that blocks the switch
+                  bool in_corridor = isInCorridor(check_car_s, car_s, gap_length_front, gap_length_back);
+
+                  // If this car is in near range corridor, block this lane
+                  if(in_corridor) {
+                    lane_safe_switch[lane_id] = false;
+                    // std::cout << "Car blocks lane " << lane_id << std::endl;
+                  } else {
+                    // Check if this car is in the speed-sensoring corridor
+                    // And if this car is in this gap and travelling with high speed, block lane
+                    bool in_speed_check_corridor = isInCorridor(check_car_s, car_s, 0.0, gap_speed_sensoring_length);
+                    bool vehicle_with_high_speed = check_speed > (v_ref + gap_max_speed_diff);
+                    if(in_speed_check_corridor && vehicle_with_high_speed) {
+                      lane_safe_switch[lane_id] = false;
+                      // std::cout << "Car speed blocks lane " << lane_id << std::endl;
+                    }
+                  }
           	    }
           	  }
           	}
 
-          	if(!too_close)
-          	  v_ref = v_ref_cruise;
+          	// Acceleration and Deceleration
+          	if(too_close)
+          	  v_ref -= 0.224;
+          	else if(v_ref < v_ref_cruise)
+          	  v_ref += 0.224;
 
+          	// After adjusting the speed for safety, try to switch lanes
+          	if(too_close) {
+          	  // Switch lane only if we drive on the reference lane
+          	  bool driving_on_local_lane = isOnLocalLane(car_d, local_lane);
+          	  if(driving_on_local_lane)
+          	    local_lane = switchLane(local_lane, lane_safe_switch);
+
+          	  std::cout << "DriveLane: " << local_lane << std::endl;
+          	}
+
+          	std::cout << "SafeLanes: ";
+            for(int sl = 0; sl < lane_safe_switch.size(); sl++)
+              std::cout << lane_safe_switch[sl];
+            std::cout << std::endl;
 
           	// Define temporary path points for spline calculation
           	vector<double> ptsx, ptsy;
@@ -342,10 +440,11 @@ int main() {
               ptsy.push_back(ref_y);
           	}
 
+          	double start_pt = prev_points_size > 2 ? end_path_s : car_s;
           	// Generate "future horizon" waypoints
           	for (int i = 1; i <= waypoints_count; i++) {
           	  // Create new waypoints and push them into the path points list
-          	  auto wp = getXY(car_s + (i*waypoints_dists), getGlobalLane(local_lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
+          	  auto wp = getXY(start_pt + (i*waypoints_dists), getGlobalLane(local_lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
           	  ptsx.push_back(wp[0]);
           	  ptsy.push_back(wp[1]);
           	}
