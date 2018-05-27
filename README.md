@@ -4,6 +4,7 @@ Self-Driving Car Engineer Nanodegree Program
 [//]: # (Image References)
 [image1]: ./images/lane_changes.png "Lane classification"
 [image2]: ./images/lane_changes_2.png "Lane classification 2"
+[image3]: ./images/yt.png "Youtube video"
 
 ### Simulator.
 You can download the Term3 Simulator which contains the Path Planning Project from the [releases tab (https://github.com/udacity/self-driving-car-sim/releases/tag/T3_v1.2).
@@ -123,12 +124,65 @@ The car should be able to change the lane to efficiently go over the track. To e
 
 This results in either safe or unsafe lanes because of cars next to us:
 ![Safe or unsafe lanes 1][image1]
+
 (Image based on an image from course material of trajectory generation)
 
 And in safe or unsafe lanes because of other cars with high velocity:
 ![Safe or unsafe lanes 2][image2]
+
 (Image based on an image from course material of trajectory generation)
 
+
+* The switchLanes() function is called if we have to decelerate because of a car in front of us and if we are driving on the current reference lane *local_lane* (to avoid lane bouncing).
+
+```cpp 
+  if(too_close) {
+    // Switch lane only if we drive on the reference lane
+    bool driving_on_local_lane = isOnLocalLane(car_d, local_lane);
+    if(driving_on_local_lane)
+      local_lane = switchLane(local_lane, lane_safe_switch);
+
+    std::cout << "DriveLane: " << local_lane << std::endl;
+  }
+```
+
+* In the switchLanes() function, a safe lane next to us is selected. Otherwise the current lane is returned:
+```cpp 
+  int switchLane(const int current_lane, const vector<bool>& safe_lanes) {
+    if(safe_lanes.size() != 3)
+      return current_lane;
+
+    bool all_blocked = true;
+    for(const auto & c_safe : safe_lanes)
+      all_blocked &= !c_safe;
+
+    if(all_blocked)
+      return current_lane;
+
+    vector<int> possible_lane_switches;
+    if(current_lane - 1 >= 0)
+      possible_lane_switches.push_back(current_lane - 1);
+
+    if(current_lane + 1 <= 2)
+      possible_lane_switches.push_back(current_lane + 1);
+
+    for(const auto & lane_switch : possible_lane_switches) {
+      if(safe_lanes[lane_switch] == true)
+        return lane_switch;
+    }
+
+    return current_lane;
+  }
+```
+
+### Pros and cons
+
+There might be a lot more points to think of. What if some other car suddenly changes its lane, and our trajectory falls into its way (collision!). Additionally, there could be a module that checks if a lane change makes sense - because if there is a much slower car in front of us after the lange change, this maneuver was senseless. 
+
+### Video
+
+Please click on the following image to open the Youtube-video:
+![Youtube video][image3]
 
 
 
