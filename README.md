@@ -1,6 +1,10 @@
 # CarND-Path-Planning-Project
 Self-Driving Car Engineer Nanodegree Program
-   
+
+[//]: # (Image References)
+[image1]: ./images/lane_changes.png "Lane classification"
+[image2]: ./images/lane_changes_2.png "Lane classification 2"
+
 ### Simulator.
 You can download the Term3 Simulator which contains the Path Planning Project from the [releases tab (https://github.com/udacity/self-driving-car-sim/releases/tag/T3_v1.2).
 
@@ -11,6 +15,122 @@ In this project your goal is to safely navigate around a virtual highway with ot
 Each waypoint in the list contains  [x,y,s,dx,dy] values. x and y are the waypoint's map coordinate position, the s value is the distance along the road to get to that waypoint in meters, the dx and dy values define the unit normal vector pointing outward of the highway loop.
 
 The highway's waypoints loop around so the frenet s value, distance along the road, goes from 0 to 6945.554.
+
+## Reflection
+
+In the reflection section I am going to explain how the final submission code is working. The code is based on the original repository and additional elements from the course walkthrough video material. The main points to achieve are 
+
+* Drive around the track without incident
+* Keep speed but do not exceed speed limit
+* Max acceleration and jerk may not be exceeded
+* Change lanes in a sensefull way
+* Do not collide
+
+### How the path is computed from the simulator waypoints
+
+The driving path is based on sparse waypoints that are given by the simulator data. To drive in a smooth manner, the [Cubic Spline Interpolation Library](http://kluge.in-chemnitz.de/opensource/spline/) is used. By using this library, the path is generated with a spline, going through all the given anchor points.
+
+To adjust the car speed, the distances of future points on the spline are computed by linearization of the spline (the way Aaron did it in the walkthrough video). 
+
+To not exceed the speed limit of 50 mph, the reference velocity is set to 49.5.
+```cpp
+  // Target velocity
+  double v_ref_cruise = 49.5;
+```
+
+### Acceleration, Deceleration and Jerk
+
+To stay in the given ranges of acceleration, deceleration and jerk, the reference velocity is de- or incremented in small steps. This ensures a steady behavior of the car. But one might think abount, that if another car with low speed switches lane and is suddenly in front of our car, the deceleration may not be sufficient! Jerk is also reduced by using the spline library, that creates smooth paths.
+
+### Change the lane if it is necessary
+
+The car should be able to change the lane to efficiently go over the track. To establish this mechanism, I do the following additions to the code:
+
+* Add a vector for the lanes, encoding if they are safe to change to
+```cpp
+   // For all lanes, define a boolean for 'this is safe to switch onto'
+   vector<bool> lane_safe_switch(3, true);
+```
+
+* Define some ranges in meters, where no car may drive (for the lane to be safe)
+```cpp
+   // Gap length in front of us in meters for safe lane switch
+  double gap_length_front = 15.0;
+  // Gap length behind us in meters for safe lane switch
+  double gap_length_back = 15.0;
+```
+
+* Define a range to the rear of the car, where no car may be, that drives significantly faster
+```cpp
+   // Gap length behind us in meters were we look for other vehicles traveling with high speed
+  double gap_speed_sensoring_length = 30.0;
+  // Maximum speed gap of a car that drives behind us on a lane where we want to switch to.
+  double gap_max_speed_diff = 20.0;
+```
+
+* Use the sensor_fusion data structure to analyse, if cars are in the lanes next to our car. These computations are based on the Frenet coordinates of our car and the sensored cars. To check all lanes, I created some helper functions:
+```cpp
+   float getGlobalLane(const float local_lane) {
+     return 2.0 + 4.0 * local_lane;
+   }
+
+   bool isOnLocalLane(const float d, const int local_lane, const float eps = 0.25) {
+     if(d < getGlobalLane((float)local_lane + eps) && d > getGlobalLane((float)local_lane - eps))
+       return true;
+     return false;
+   }
+
+   bool isInCorridor(const float s, const float s_ref, const float gap_forward, const float gap_backwards) {
+     return ((s < (s_ref + gap_forward)) && (s > (s_ref - gap_backwards)));
+   }
+```
+
+* With the help of these functions, 'block' lanes if there is a car in the restricted area. First of all, check if the current car is on a specific lane. If yes, check if this car is in a specific corridor (next to our car). Where *d* is the sensored cars d-coordinate, *check_cars_s* the sensored cars s-coordinate and *car_s* the s-coordinate of our car.
+
+```cpp 
+
+   // Get the d-coordinate of the car
+   float d = sensor_fusion[i][6];
+   
+   for(int lane_id = 0; lane_id <=2; lane_id++) {
+   
+      // Check if this car is on the current lane to be checked
+      bool on_curr_lane = isOnLocalLane(d, lane_id, lane_offset);
+      if(on_curr_lane) {
+
+         // If yes, check if this car is in the zone that blocks the switch
+         bool in_corridor = isInCorridor(check_car_s, car_s, gap_length_front, gap_length_back);
+
+         // If this car is in near range corridor, block this lane
+         if(in_corridor) {
+           lane_safe_switch[lane_id] = false;
+      }
+      ...
+```
+
+* Maybe we are really slow and want to change the lane, but there is a car (behind us) driving on the lane where we want to switch to. If this car is significantly faster then we are, then do not switch to this lane (block the lane).
+
+```cpp 
+   // Check if this car is in the speed-sensoring corridor
+   // And if this car is in this gap and travelling with high speed, block lane
+   bool in_speed_check_corridor = isInCorridor(check_car_s, car_s, 0.0, gap_speed_sensoring_length);
+   bool vehicle_with_high_speed = check_speed > (v_ref + gap_max_speed_diff);
+   if(in_speed_check_corridor && vehicle_with_high_speed) {
+      lane_safe_switch[lane_id] = false;
+      // std::cout << "Car speed blocks lane " << lane_id << std::endl;
+   }
+```
+
+This results in either safe or unsafe lanes because of cars next to us:
+![Safe or unsafe lanes 1][image1]
+(Image based on an image from course material of trajectory generation)
+
+And in safe or unsafe lanes because of other cars with high velocity:
+![Safe or unsafe lanes 2][image2]
+(Image based on an image from course material of trajectory generation)
+
+
+
 
 ## Basic Build Instructions
 
